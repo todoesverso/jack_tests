@@ -34,20 +34,16 @@ jack_client_t *client;
 /*The current sample rate*/
 jack_nframes_t SAMPLE_RATE;
 int a = 1;
-
 typedef jack_default_audio_sample_t sample_t;
-
-
 bool curses_started = false;
 
-void endCurses()
+void stop_curses()
 {
 	if (curses_started && !isendwin())
 		endwin();
 }
 
-
-void startCurses()
+void start_curses()
 {
 	if (curses_started) {
 		refresh();
@@ -57,14 +53,23 @@ void startCurses()
 		noecho();
 		intrflush(stdscr, false);
 		keypad(stdscr, true);
-		atexit(endCurses);
+		atexit(stop_curses);
 		curses_started = true;
 	}
 }
 
-
-
-
+char key_pressed() 
+{
+	char ch;	
+	start_curses();
+	timeout(0);
+	ch = getch();
+	stop_curses();
+	if (ch != ERR)
+		return ch;
+	else
+		return '0';
+}
 
 static void signal_handler(int sig)
 {
@@ -80,19 +85,13 @@ static void signal_handler(int sig)
  * This client follows a simple rule: when the JACK transport is
  * running, copy the input port to the output.  When it stops, exit.
  */
-
 int process(jack_nframes_t nframes, void *arg)
 {
 	int i, j;
 	char k;
 	sample_t *in, *out;
-	startCurses();
 
-	timeout(0);
-	k = getch();
-//              printf("%d\n",a);
-
-	endCurses();
+	k = key_pressed(); 
 	if (k == 'a') {
 		a++;
 	}
@@ -100,24 +99,19 @@ int process(jack_nframes_t nframes, void *arg)
 		a--;
 	}
 
-
-
 	for (i = 0; i < 2; i++) {
 		in = jack_port_get_buffer(input_ports[i], nframes);
 		for (j = 0; j < nframes; j++) {
 			if (in[j] < 0) {
 				in[j] = in[j] * (-90.0f) * a;
 			}
-			//      in[j] = 1.0f - in[j] * 1000.0f ;
-//              in[j] =  in[j] - in[nframes-j] ;
 		}
+
 		out = jack_port_get_buffer(output_ports[i], nframes);
 		for (j = 0; j < nframes; j++) {
 			if (out[j] > 0) {
 				out[j] = out[j] * (-10.0f) * a;
 			}
-			//      in[j] = 1.0f - in[j] * 1000.0f ;
-//              in[j] =  in[j] - in[nframes-j] ;
 		}
 
 		memcpy(out, in, nframes * sizeof(sample_t));
@@ -131,8 +125,6 @@ int srate(jack_nframes_t nframes, void *arg)
 	SAMPLE_RATE = nframes;
 	return 0;
 }
-
-
 
 /**
  * JACK calls this shutdown_callback if the server ever shuts down or
@@ -196,15 +188,14 @@ int main(int argc, char *argv[])
 	   there is work to be done.
 	 */
 	jack_set_process_callback(client, process, 0);
+
 	/* tell the JACK server to call `jack_shutdown()' if
 	   it ever shuts down, either entirely, or if it
 	   just decides to stop calling us.
 	 */
-
 	jack_set_sample_rate_callback(client, srate, 0);
 
 	printf("engine sample rate: %lu\n", jack_get_sample_rate(client));
-
 
 	jack_on_shutdown(client, jack_shutdown, 0);
 
@@ -282,7 +273,6 @@ int main(int argc, char *argv[])
 	signal(SIGINT, signal_handler);
 
 	/* keep running until the transport stops */
-
 	while (1) {
 		sleep(1);
 	}
