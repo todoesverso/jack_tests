@@ -33,9 +33,14 @@ jack_port_t **output_ports;
 jack_client_t *client;
 /*The current sample rate*/
 jack_nframes_t SAMPLE_RATE;
-int a = 1;
 typedef jack_default_audio_sample_t sample_t;
 bool curses_started = false;
+
+/* Global variables for effects */
+float b = 0.636;
+float c = 1.572;
+int a = 1;
+
 
 void stop_curses()
 {
@@ -78,6 +83,34 @@ static void signal_handler(int sig)
 	exit(0);
 }
 
+static void update_parameters() {
+	char key;
+
+	key = key_pressed(); 
+	switch(key) {
+	case 'a':
+		a++;
+		break;
+	case 'z':
+		a--;
+		break;
+	case 's':
+		b += 0.1;
+		break;
+	case 'x':
+		b -= 0.1;
+		break;
+	case 'd':
+		c += 0.1;
+		break;
+	case 'c':
+		c -= 0.1;
+		break;
+	default:
+		break;
+	}
+}
+
 /**
  * The process callback for this JACK application is called in a
  * special realtime thread once for each audio cycle.
@@ -87,33 +120,21 @@ static void signal_handler(int sig)
  */
 int process(jack_nframes_t nframes, void *arg)
 {
-	int i, j;
-	char k;
+	int i, j; 
+	float ir;
 	sample_t *in, *out;
-
-	k = key_pressed(); 
-	if (k == 'a') {
-		a++;
-	}
-	if (k == 'z') {
-		a--;
-	}
-
+	
+	update_parameters();
+	
 	for (i = 0; i < 2; i++) {
 		in = jack_port_get_buffer(input_ports[i], nframes);
 		for (j = 0; j < nframes; j++) {
-			if (in[j] < 0) {
-				in[j] = in[j] * (-90.0f) * a;
-			}
+				//ir = atanf(1.572*in[j])*0.636;
+				ir = atanf(c*in[j])*b;
+				in[j] = a * in[j] + ir;
 		}
 
 		out = jack_port_get_buffer(output_ports[i], nframes);
-		for (j = 0; j < nframes; j++) {
-			if (out[j] > 0) {
-				out[j] = out[j] * (-10.0f) * a;
-			}
-		}
-
 		memcpy(out, in, nframes * sizeof(sample_t));
 	}
 	return 0;
