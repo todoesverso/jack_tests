@@ -37,10 +37,75 @@ typedef jack_default_audio_sample_t sample_t;
 bool curses_started = false;
 
 /* Global variables for effects */
-float b = 0.636;
-float c = 1.572;
-int a = 1;
+//float b = 0.636;
+//float c = 1.572;
+//int a = 1;
+short int type_func = 0; 
+float gain_wet = 1.0;
+float gain_dry = 1.0;
+float c = 1.0;
+float d = 1.0;
+float DIST = 0.9;
 
+float __max(float a, float b)
+{
+        if ( a > b ) 
+                return a;
+        else
+                return b;
+}
+
+float __min(float a, float b)
+{
+        if ( a < b ) 
+                return a;
+        else
+                return b;
+}
+
+#define saturate(x) __min(__max(-1.0,x),1.0)
+
+float BassBoosta(float sample)
+{
+	static float selectivity, gain1, gain2, ratio, cap;
+	selectivity = 140;
+	ratio = 0.9;
+        gain2 = 0.9;	
+	gain1 = 1.0/(selectivity + 1.0);
+
+	cap = (sample + cap*selectivity )*gain1;
+	sample = saturate((sample + cap*ratio)*gain2);
+
+	return sample;
+}
+
+static void opamp(float *in, float *out, long nframes)
+{
+        long j;
+        float temp;
+        float A = 1/((104.7 - (100*DIST))*1E+6);
+        float B = 1/((25*DIST)*1E-6);
+        float C = 1/((25*DIST)*(104.7 - (100*DIST)));
+
+        float A2 = 1 - 2*(2*A + B)/SAMPLE_RATE + 4*C/(SAMPLE_RATE*SAMPLE_RATE);
+        float A1 = 2 - 8*C/(SAMPLE_RATE*SAMPLE_RATE);
+        float A0 = 1 + 2*(2*A + B)/SAMPLE_RATE + 4*C/(SAMPLE_RATE*SAMPLE_RATE);
+
+        float B2 = 1 - 2*(A + B)/SAMPLE_RATE + 4*C/(SAMPLE_RATE*SAMPLE_RATE);
+        float B1 = A1;
+        float B0 = 1 + 2*(A + B)/SAMPLE_RATE + 4*C/(SAMPLE_RATE*SAMPLE_RATE);
+
+        //printf("A =%E  B =%E C =%E\n",A,B,C);
+        //printf("A2 =%E  B1 =%E B0 =%E\n",A2,A1,A0);
+        //printf("B2 =%E  B1 =%E B0 =%E\n",B2,B1,B0);
+        //
+        //
+        for (j = 0; j < nframes; j++) {
+                        out[j] = (float)(B0*A0*in[j] + B1*A0*in[j-1] + B2*A0*in[j-2] - (A1/A0)*out[j-1] - (A2/A0)*out[j-2]);
+//                printf("out =%E  \n",in[j]);
+	}
+
+}
 
 void stop_curses()
 {
@@ -72,8 +137,8 @@ char key_pressed()
 	stop_curses();
 	if (ch != ERR)
 		return ch;
-	else
-		return '0';
+        else
+                return 'p';
 }
 
 static void signal_handler(int sig)
@@ -85,30 +150,78 @@ static void signal_handler(int sig)
 
 static void update_parameters() {
 	char key;
+        float inc = 0.01;
 
 	key = key_pressed(); 
 	switch(key) {
 	case 'a':
-		a++;
+		gain_dry = inc;
 		break;
 	case 'z':
-		a--;
+		gain_dry -= inc;
 		break;
 	case 's':
-		b += 0.1;
+		gain_wet += inc;
 		break;
 	case 'x':
-		b -= 0.1;
+		gain_wet -= inc;
 		break;
 	case 'd':
-		c += 0.1;
+		c += inc;
+                DIST +=inc;
 		break;
 	case 'c':
-		c -= 0.1;
+		c -= inc;
+                DIST -=inc;
 		break;
+	case 'f':
+		d += inc;
+		break;
+	case 'v':
+		d -= inc;
+		break;
+        case '1':
+                type_func = 1;
+                break;
+        case '2':
+                type_func = 2;
+                break;
+        case '3':
+                type_func = 3;
+                break;
+        case 'm':
+                gain_dry = 0;
+                break;
+        case '0':
+                gain_wet = 0;
+                break;
+	
 	default:
 		break;
 	}
+}
+
+static float calculate_ir(float x) 
+{
+        float ir;
+
+	switch(type_func) {
+                case 1:
+			ir = atanf(c * x);
+                        break;
+                case 2:
+			ir = c*(x * x * x) + d*(x * x);
+                        break;
+                case 3:
+                        //ir = atanf(c * x);
+                        ir = sqrt(c * x);
+                        break;
+                default:
+                        ir = 0;
+        }
+
+        return ir;
+
 }
 
 /**
@@ -121,21 +234,30 @@ static void update_parameters() {
 int process(jack_nframes_t nframes, void *arg)
 {
 	int i, j; 
-	float ir;
+	//long double ir;
 	sample_t *in, *out;
 	
 	update_parameters();
 	
 	for (i = 0; i < 2; i++) {
-		in = jack_port_get_buffer(input_ports[i], nframes);
-		for (j = 0; j < nframes; j++) {
-				//ir = atanf(1.572*in[j])*0.636;
-				ir = atanf(c*in[j])*b;
-				in[j] = a * in[j] + ir;
-		}
-
 		out = jack_port_get_buffer(output_ports[i], nframes);
+		in = jack_port_get_buffer(input_ports[i], nframes);
+
+	/*	for (j = 0; j < nframes; j++) {
+				//ir = atanf(1.572*in[j])*0.636;
+				//ir = atanf(c*in[j])*b;
+				//in[j] = a*sqrt(sqrt(in[j])) + c*c*(in[j]);
+				//ir = calculate_ir(in[j]);
+				//ir = BassBoosta(ir);				
+                                if ((j>2) && (j<nframes-2))
+                                        ir = opamp(in[j], in[j-1], in[j-2], out[j], out[j-1], out[j-2]);
+                                else
+                                        ir = 0.1;
+				in[j] = (gain_dry * in[j]) + (gain_wet * ir);
+		}
+        */
 		memcpy(out, in, nframes * sizeof(sample_t));
+                opamp(in, out, nframes);
 	}
 	return 0;
 }
