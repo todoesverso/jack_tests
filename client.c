@@ -23,10 +23,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <math.h>
-#include <curses.h>
 #include <signal.h>
 #include <jack/jack.h>
+
+#include "functions.h"
 
 jack_port_t **input_ports;
 jack_port_t **output_ports;
@@ -34,194 +34,13 @@ jack_client_t *client;
 /*The current sample rate*/
 jack_nframes_t SAMPLE_RATE;
 typedef jack_default_audio_sample_t sample_t;
-bool curses_started = false;
 
-/* Global variables for effects */
-//float b = 0.636;
-//float c = 1.572;
-//int a = 1;
-short int type_func = 0; 
-float gain_wet = 1.0;
-float gain_dry = 1.0;
-float c = 1.0;
-float d = 1.0;
-float DIST = 0.9;
-
-float __max(float a, float b)
-{
-        if ( a > b ) 
-                return a;
-        else
-                return b;
-}
-
-float __min(float a, float b)
-{
-        if ( a < b ) 
-                return a;
-        else
-                return b;
-}
-
-#define saturate(x) __min(__max(-1.0,x),1.0)
-
-float BassBoosta(float sample)
-{
-	static float selectivity, gain1, gain2, ratio, cap;
-	selectivity = 140;
-	ratio = 0.9;
-        gain2 = 0.9;	
-	gain1 = 1.0/(selectivity + 1.0);
-
-	cap = (sample + cap*selectivity )*gain1;
-	sample = saturate((sample + cap*ratio)*gain2);
-
-	return sample;
-}
-
-static void opamp(float *in, float *out, long nframes)
-{
-        long j;
-        float temp;
-        float A = 1/((104.7 - (100*DIST))*1E+6);
-        float B = 1/((25*DIST)*1E-6);
-        float C = 1/((25*DIST)*(104.7 - (100*DIST)));
-
-        float A2 = 1 - 2*(2*A + B)/SAMPLE_RATE + 4*C/(SAMPLE_RATE*SAMPLE_RATE);
-        float A1 = 2 - 8*C/(SAMPLE_RATE*SAMPLE_RATE);
-        float A0 = 1 + 2*(2*A + B)/SAMPLE_RATE + 4*C/(SAMPLE_RATE*SAMPLE_RATE);
-
-        float B2 = 1 - 2*(A + B)/SAMPLE_RATE + 4*C/(SAMPLE_RATE*SAMPLE_RATE);
-        float B1 = A1;
-        float B0 = 1 + 2*(A + B)/SAMPLE_RATE + 4*C/(SAMPLE_RATE*SAMPLE_RATE);
-
-        //printf("A =%E  B =%E C =%E\n",A,B,C);
-        //printf("A2 =%E  B1 =%E B0 =%E\n",A2,A1,A0);
-        //printf("B2 =%E  B1 =%E B0 =%E\n",B2,B1,B0);
-        //
-        //
-        for (j = 0; j < nframes; j++) {
-                        out[j] = (float)(B0*A0*in[j] + B1*A0*in[j-1] + B2*A0*in[j-2] - (A1/A0)*out[j-1] - (A2/A0)*out[j-2]);
-//                printf("out =%E  \n",in[j]);
-	}
-
-}
-
-void stop_curses()
-{
-	if (curses_started && !isendwin())
-		endwin();
-}
-
-void start_curses()
-{
-	if (curses_started) {
-		refresh();
-	} else {
-		initscr();
-		cbreak();
-		noecho();
-		intrflush(stdscr, false);
-		keypad(stdscr, true);
-		atexit(stop_curses);
-		curses_started = true;
-	}
-}
-
-char key_pressed() 
-{
-	char ch;	
-	start_curses();
-	timeout(0);
-	ch = getch();
-	stop_curses();
-	if (ch != ERR)
-		return ch;
-        else
-                return 'p';
-}
 
 static void signal_handler(int sig)
 {
 	jack_client_close(client);
 	fprintf(stderr, "signal received, exiting ...\n");
 	exit(0);
-}
-
-static void update_parameters() {
-	char key;
-        float inc = 0.01;
-
-	key = key_pressed(); 
-	switch(key) {
-	case 'a':
-		gain_dry = inc;
-		break;
-	case 'z':
-		gain_dry -= inc;
-		break;
-	case 's':
-		gain_wet += inc;
-		break;
-	case 'x':
-		gain_wet -= inc;
-		break;
-	case 'd':
-		c += inc;
-                DIST +=inc;
-		break;
-	case 'c':
-		c -= inc;
-                DIST -=inc;
-		break;
-	case 'f':
-		d += inc;
-		break;
-	case 'v':
-		d -= inc;
-		break;
-        case '1':
-                type_func = 1;
-                break;
-        case '2':
-                type_func = 2;
-                break;
-        case '3':
-                type_func = 3;
-                break;
-        case 'm':
-                gain_dry = 0;
-                break;
-        case '0':
-                gain_wet = 0;
-                break;
-	
-	default:
-		break;
-	}
-}
-
-static float calculate_ir(float x) 
-{
-        float ir;
-
-	switch(type_func) {
-                case 1:
-			ir = atanf(c * x);
-                        break;
-                case 2:
-			ir = c*(x * x * x) + d*(x * x);
-                        break;
-                case 3:
-                        //ir = atanf(c * x);
-                        ir = sqrt(c * x);
-                        break;
-                default:
-                        ir = 0;
-        }
-
-        return ir;
-
 }
 
 /**
@@ -233,7 +52,7 @@ static float calculate_ir(float x)
  */
 int process(jack_nframes_t nframes, void *arg)
 {
-	int i, j; 
+	int i; 
 	//long double ir;
 	sample_t *in, *out;
 	
@@ -257,7 +76,7 @@ int process(jack_nframes_t nframes, void *arg)
 		}
         */
 		memcpy(out, in, nframes * sizeof(sample_t));
-                opamp(in, out, nframes);
+                opamp(in, out, nframes, SAMPLE_RATE);
 	}
 	return 0;
 }
